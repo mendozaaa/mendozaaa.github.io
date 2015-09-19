@@ -1,0 +1,582 @@
+<!DOCTYPE html>
+<meta charset="utf-8">
+<style>
+
+/* CSS goes here. */
+body { margin: 0; }
+
+html, body, div, span, h1, h2, h3, h4, h5, h6, p, a, svg, canvas {
+    margin: 0;
+    padding: 0;
+    border: 0;
+    font: 1em mplus-2p-light-sub,Helvetica,arial,freesans,clean,sans-serif;
+    -webkit-font-smoothing: subpixel-antialiased; /* safari disables subpixel antialiasing for some reason */
+}
+
+svg {
+    overflow: hidden;  /* Do not let IE draw outside the bounds of the svg element. */
+}
+
+body {
+    color: #eeeeee;
+}
+/*
+#map_canvas, #map_svg {
+    position: absolute;
+    top: 0;
+    left: 0;
+}
+*/
+
+</style>
+
+<body>
+
+    <div id="display">
+      <div id="display_canvas">
+        <canvas id="map_canvas" class="fill-screen"></canvas>
+      </div>
+      <div id="display_canvas_2">
+        <canvas id="map_canvas_2" class="fill-screen"></canvas>
+      </div>
+    </div>
+
+</body>
+
+<script src="d3.v3.min.js"></script>
+<script src="dat.gui.min.js"></script>
+
+
+<script>
+
+var map = {};
+map.width = 1400;
+map.height = 750;
+
+d3.selectAll(".fill-screen").attr("width", map.width).attr("height", map.height);
+
+map.canvas =
+  d3.select('#display_canvas')
+    .select('#map_canvas')
+    .attr("width", map.width)
+    .attr("height", map.height)
+    .node().getContext('2d');
+
+map.canvas_2 =
+  d3.select('#display_canvas_2')
+    .select('#map_canvas_2')
+    .attr("width", map.width)
+    .attr("height", 250)
+    .node().getContext('2d');
+
+
+rocket_image = new Image;
+rocket_image.onload = onload;
+rocket_image.src = "Rocket.png";
+
+rocket_left_image = new Image;
+rocket_left_image.src = "RocketLeft.png";
+
+function calc_gamma(velocity)
+{
+  var gamma = 1.0 / (Math.sqrt(1-velocity*velocity));
+  return gamma;
+}
+
+function calc_delta(gamma, velocity, length)
+{
+  var delta = gamma * (velocity*10.0 / 3.0) * length; // 1.0e9 / 3.0e8
+  return delta;
+}
+
+function calc_contracted_length(length, gamma)
+{
+  var contracted_length = length / gamma;
+  return contracted_length;
+}
+
+function calc_time_step(distance, velocity)
+{
+  var time_step = (distance*10.0) / (velocity*3.0); // 1.0e9 / 3.0e8  
+  return time_step;
+}
+
+function calc_time_step_moving(time_step, gamma)
+{
+  var time_step_moving = time_step / gamma;
+  return time_step_moving;
+}
+
+function onload() 
+{
+  var params = {
+    length   : 6.0 * Math.sqrt(3),
+    velocity : Math.sqrt(3)/2.0,
+    "reset params" : function() {}
+  };
+
+  var gui = new dat.GUI( {autoPlace:false} );
+  document.getElementById("display_canvas").appendChild(gui.domElement);
+
+  var length_controller = gui.add(params, 'length', 0.1, 100).listen();
+  var velocity_controller = gui.add(params, 'velocity', 0.001, 1.0).listen();
+  var reset_controller = gui.add(params,'reset params');
+
+  var params_2 = {
+    o_time       : 0,
+    o_prime_time : 0,
+    length   : 6.0 * Math.sqrt(3),
+    velocity : Math.sqrt(3)/2.0,
+    "reset params" : function() {}
+  };
+
+  var gui_2 = new dat.GUI( {autoPlace:false} );
+  var element = document.getElementById("display_canvas_2");
+  element.appendChild(gui_2.domElement);
+
+  var length_2_controller = gui_2.add(params_2, 'length', 0.1, 100).listen();
+  var velocity_2_controller = gui_2.add(params_2, 'velocity', 0.001, 1.0).listen();
+  var o_controller = gui_2.add( params_2, "o_time", -75, 25 ).step(1).listen();
+  var o_prime_controller = gui_2.add( params_2, "o_prime_time", -75, 25 ).step(1).listen();
+  var reset_2_controller = gui_2.add(params_2,'reset params');
+
+  update();
+  update_2();
+
+  length_controller.onChange( update );
+  velocity_controller.onChange( update );
+  reset_controller.onChange( reset );
+
+  length_2_controller.onChange( update_2 );
+  velocity_2_controller.onChange( update_2 );
+  o_controller.onChange( update_2 );
+  o_prime_controller.onChange( update_2 );
+  reset_2_controller.onChange( reset_2 );
+
+  function reset(value)
+  {
+    params.length = 6.0 * Math.sqrt(3); 
+    params.velocity=Math.sqrt(3)/2.0;    
+
+    update();
+  }
+
+  function reset_2(value)
+  {
+    params_2.length = 6.0 * Math.sqrt(3); 
+    params_2.velocity=Math.sqrt(3)/2.0;    
+    params_2.o_time = 0;
+    params_2.o_prime_time = 0;
+
+    update_2();
+  }
+
+
+  function update_2(value) {
+
+    var top_margin = 100;
+    var left_margin = 200;
+    var rocket_width = 200;
+    var rocket_height = 50;
+
+    map.canvas_2.font = "12px Arial";
+    map.canvas_2.textAlign = "center";
+
+    map.canvas_2.clearRect(0,0,map.canvas_2.canvas.width,map.canvas_2.canvas.height);
+
+    var gamma = calc_gamma( params_2.velocity );
+    var contracted_length = calc_contracted_length( params_2.length, gamma );
+
+    var delta = calc_delta( gamma, params_2.velocity, contracted_length );
+
+    var contracted_width = rocket_width * contracted_length / params_2.length;
+
+    var o_prime_time = calc_time_step_moving( params_2.o_time, gamma );
+    var rocket_offset = -params_2.o_time * params_2.velocity * 3.0 / (10.0 * params_2.length);
+
+    var e = [false, false, false, false];
+
+    if( Math.abs(rocket_offset*rocket_width-rocket_width)<1 ) {
+      e[0] = true;
+    } else if( Math.abs(rocket_offset*rocket_width+contracted_width-rocket_width)<1 ) {
+      e[1] = true;
+    } else if( params_2.o_time == 0.0 ) {
+      e[2] = true;
+    } else if( Math.abs(rocket_offset*rocket_width+contracted_width)<1 ) {
+      e[3] = true;
+    }
+
+    map.canvas_2.drawImage( rocket_image, left_margin, top_margin, rocket_width, rocket_height );
+
+    map.canvas_2.drawImage( rocket_left_image, left_margin + rocket_offset*rocket_width, top_margin + rocket_height, contracted_width, rocket_height );
+
+    if( e[2] ) {
+      map.canvas_2.fillStyle = "blue";
+    } else if( e[3] ) {
+      map.canvas_2.fillStyle = "magenta";
+    }
+    map.canvas_2.fillText((params_2.o_time).toFixed(2), left_margin, top_margin - 0.25*rocket_height);
+    map.canvas_2.fillStyle = "black";
+
+    if( e[0] ) {
+      map.canvas_2.fillStyle = "red";
+    } else if( e[1] ) {
+      map.canvas_2.fillStyle = "green";
+    }
+
+    map.canvas_2.fillText((params_2.o_time).toFixed(2), left_margin+rocket_width, top_margin - 0.25*rocket_height);
+    map.canvas_2.fillStyle = "black";
+
+    if( e[2] ) {
+      map.canvas_2.fillStyle = "blue";
+    } else if( e[0] ) {
+      map.canvas_2.fillStyle = "red";
+    } 
+    map.canvas_2.fillText((o_prime_time).toFixed(2), left_margin+rocket_offset*rocket_width, top_margin + 2.25*rocket_height);
+    map.canvas_2.fillStyle = "black";
+
+    if( e[3] ) {
+      map.canvas_2.fillStyle = "magenta";
+    } else if( e[1] ) {
+      map.canvas_2.fillStyle = "green";
+    }
+    map.canvas_2.fillText((o_prime_time+delta).toFixed(2), left_margin+rocket_offset*rocket_width+contracted_width, top_margin + 2.25*rocket_height);
+    map.canvas_2.fillStyle = "black";
+
+    map.canvas_2.setLineDash([5,5]);
+
+    if( e[0] ) {
+      map.canvas_2.strokeStyle = "red";
+      map.canvas_2.beginPath();
+      map.canvas_2.moveTo( left_margin+rocket_width, top_margin - 0.125*rocket_height );
+      map.canvas_2.lineTo( left_margin+rocket_width, top_margin + 2.000*rocket_height );
+      map.canvas_2.stroke();
+      map.canvas_2.strokeStyle = "black";      
+      map.canvas_2.beginPath();
+      map.canvas_2.moveTo( left_margin, top_margin - 0.125*rocket_height );
+      map.canvas_2.lineTo( left_margin, top_margin + 0.5*rocket_height );
+      map.canvas_2.moveTo( left_margin+rocket_offset*rocket_width+contracted_width, top_margin + 1.5*rocket_height );
+      map.canvas_2.lineTo( left_margin+rocket_offset*rocket_width+contracted_width, top_margin + 2.0*rocket_height );
+      map.canvas_2.stroke();
+    } else if( e[1] ) {
+      map.canvas_2.strokeStyle = "green";
+      map.canvas_2.beginPath();
+      map.canvas_2.moveTo( left_margin+rocket_width, top_margin - 0.125*rocket_height );
+      map.canvas_2.lineTo( left_margin+rocket_width, top_margin + 2.000*rocket_height );
+      map.canvas_2.stroke();
+      map.canvas_2.strokeStyle = "black";      
+      map.canvas_2.beginPath();
+      map.canvas_2.moveTo( left_margin, top_margin - 0.125*rocket_height );
+      map.canvas_2.lineTo( left_margin, top_margin + 0.5*rocket_height );
+      map.canvas_2.moveTo( left_margin+rocket_offset*rocket_width, top_margin + 1.5*rocket_height );
+      map.canvas_2.lineTo( left_margin+rocket_offset*rocket_width, top_margin + 2.0*rocket_height );
+      map.canvas_2.stroke();
+    } else if( e[2] )
+    {
+      map.canvas_2.strokeStyle = "blue";
+      map.canvas_2.beginPath();
+      map.canvas_2.moveTo( left_margin, top_margin - 0.125*rocket_height );
+      map.canvas_2.lineTo( left_margin, top_margin + 2.000*rocket_height );
+      map.canvas_2.stroke();
+      map.canvas_2.strokeStyle = "black";
+      map.canvas_2.beginPath();
+      map.canvas_2.moveTo( left_margin+rocket_width, top_margin - 0.125*rocket_height );
+      map.canvas_2.lineTo( left_margin+rocket_width, top_margin + 0.5*rocket_height );
+      map.canvas_2.moveTo( left_margin+rocket_offset*rocket_width+contracted_width, top_margin + 1.5*rocket_height );
+      map.canvas_2.lineTo( left_margin+rocket_offset*rocket_width+contracted_width, top_margin + 2.0*rocket_height );
+      map.canvas_2.stroke();
+    }
+    else if( e[3] )
+    {
+      map.canvas_2.strokeStyle = "magenta";
+      map.canvas_2.beginPath();
+      map.canvas_2.moveTo( left_margin, top_margin - 0.125*rocket_height );
+      map.canvas_2.lineTo( left_margin, top_margin + 2.000*rocket_height );
+      map.canvas_2.stroke();
+      map.canvas_2.strokeStyle = "black";
+      map.canvas_2.beginPath();
+      map.canvas_2.moveTo( left_margin+rocket_width, top_margin - 0.125*rocket_height );
+      map.canvas_2.lineTo( left_margin+rocket_width, top_margin + 0.5*rocket_height );
+      map.canvas_2.moveTo( left_margin+rocket_offset*rocket_width, top_margin + 1.5*rocket_height );
+      map.canvas_2.lineTo( left_margin+rocket_offset*rocket_width, top_margin + 2.0*rocket_height );
+      map.canvas_2.stroke();
+    } else {
+      map.canvas_2.beginPath();
+      map.canvas_2.moveTo( left_margin, top_margin - 0.125*rocket_height );
+      map.canvas_2.lineTo( left_margin, top_margin + 0.5*rocket_height );
+      map.canvas_2.moveTo( left_margin+rocket_width, top_margin - 0.125*rocket_height );
+      map.canvas_2.lineTo( left_margin+rocket_width, top_margin + 0.5*rocket_height );
+      map.canvas_2.moveTo( left_margin+rocket_offset*rocket_width, top_margin + 1.5*rocket_height );
+      map.canvas_2.lineTo( left_margin+rocket_offset*rocket_width, top_margin + 2.0*rocket_height );
+      map.canvas_2.moveTo( left_margin+rocket_offset*rocket_width+contracted_width, top_margin + 1.5*rocket_height );
+      map.canvas_2.lineTo( left_margin+rocket_offset*rocket_width+contracted_width, top_margin + 2.0*rocket_height );
+      map.canvas_2.stroke();
+
+    }
+
+  }
+
+  function update(value) {
+
+    var top_margin = 100;
+    var left_margin = 200;
+    var rocket_width = 200;
+    var rocket_height = 50;
+
+    map.canvas.font = "12px Arial";
+
+    map.canvas.clearRect(0,0,map.canvas.canvas.width,map.canvas.canvas.height);
+
+    // O''s Frame
+
+    var gamma = calc_gamma( params.velocity );
+    var contracted_length = calc_contracted_length( params.length, gamma );
+
+    var contracted_width = rocket_width * contracted_length / params.length;
+
+    for( var i=0;i<4;i++ ) {
+      map.canvas.drawImage( rocket_image, left_margin, top_margin + i*rocket_height*3, rocket_width, rocket_height );
+    }
+
+    map.canvas.drawImage( rocket_left_image, left_margin+rocket_width, top_margin + rocket_height, contracted_width, rocket_height );
+    map.canvas.drawImage( rocket_left_image, left_margin+(rocket_width-contracted_width), top_margin + 4*rocket_height, contracted_width, rocket_height );
+    map.canvas.drawImage( rocket_left_image, left_margin, top_margin + 7*rocket_height, contracted_width, rocket_height );
+    map.canvas.drawImage( rocket_left_image, left_margin-contracted_width, top_margin + 10*rocket_height, contracted_width, rocket_height );
+
+    var delta = calc_delta(gamma, params.velocity, contracted_length);
+
+    var base_time = 0;
+
+    var time_step_length = calc_time_step( contracted_length, params.velocity );
+    var moving_time_step_length = calc_time_step_moving( time_step_length, gamma );
+
+    var time_step_small = calc_time_step( params.length - contracted_length, params.velocity );
+    var moving_time_step_small = calc_time_step_moving( time_step_small, gamma );
+
+    map.canvas.setLineDash([5,5]);
+
+    map.canvas.beginPath();
+
+    map.canvas.moveTo(left_margin, top_margin - 0.125*rocket_height);
+    map.canvas.lineTo(left_margin, top_margin +  0.5*rocket_height);
+
+    map.canvas.moveTo(left_margin+rocket_width+contracted_width, top_margin +  1.5*rocket_height);
+    map.canvas.lineTo(left_margin+rocket_width+contracted_width, top_margin + 2.0*rocket_height);
+
+
+    map.canvas.moveTo(left_margin, top_margin + 2.875*rocket_height);
+    map.canvas.lineTo(left_margin, top_margin +  3.5*rocket_height);
+
+
+    map.canvas.moveTo(left_margin+rocket_width-contracted_width, top_margin +  4.5*rocket_height);
+    map.canvas.lineTo(left_margin+rocket_width-contracted_width, top_margin + 5.0*rocket_height);
+
+
+    map.canvas.moveTo(left_margin+rocket_width, top_margin + 5.875*rocket_height);
+    map.canvas.lineTo(left_margin+rocket_width, top_margin +  6.5*rocket_height);
+
+
+    map.canvas.moveTo(left_margin+contracted_width, top_margin +  7.5*rocket_height);
+    map.canvas.lineTo(left_margin+contracted_width, top_margin + 8.0*rocket_height);
+
+
+    map.canvas.moveTo(left_margin+rocket_width, top_margin + 8.875*rocket_height);
+    map.canvas.lineTo(left_margin+rocket_width, top_margin +  9.5*rocket_height);
+
+
+    map.canvas.moveTo(left_margin-contracted_width, top_margin + 10.5*rocket_height);
+    map.canvas.lineTo(left_margin-contracted_width, top_margin + 11.0*rocket_height);
+
+    map.canvas.stroke();
+
+    map.canvas.strokeStyle = "red";
+    map.canvas.beginPath();
+    map.canvas.moveTo(left_margin+rocket_width, top_margin - 0.125*rocket_height);
+    map.canvas.lineTo(left_margin+rocket_width, top_margin + 2.0*rocket_height);
+    map.canvas.stroke();
+
+    map.canvas.strokeStyle = "green";
+    map.canvas.beginPath();
+    map.canvas.moveTo(left_margin+rocket_width, top_margin + 2.875*rocket_height);
+    map.canvas.lineTo(left_margin+rocket_width, top_margin + 5.0*rocket_height);
+    map.canvas.stroke();
+
+    map.canvas.strokeStyle = "blue";
+    map.canvas.beginPath();
+    map.canvas.moveTo(left_margin, top_margin + 5.875*rocket_height);
+    map.canvas.lineTo(left_margin, top_margin + 8.0*rocket_height);
+    map.canvas.stroke();
+
+    map.canvas.strokeStyle = "magenta";
+    map.canvas.beginPath();
+    map.canvas.moveTo(left_margin, top_margin + 8.875*rocket_height);
+    map.canvas.lineTo(left_margin, top_margin + 11.0*rocket_height);
+    map.canvas.stroke();
+
+    map.canvas.strokeStyle = "black";
+
+    map.canvas.textAlign = "center";
+
+    map.canvas.fillText((base_time-time_step_small-time_step_length).toFixed(2), left_margin, top_margin - 0.25*rocket_height );
+    map.canvas.fillStyle = "red";
+    map.canvas.fillText((base_time-time_step_small-time_step_length).toFixed(2), left_margin+rocket_width, top_margin - 0.25*rocket_height );
+
+    map.canvas.fillText((base_time-moving_time_step_small-moving_time_step_length).toFixed(2),           left_margin+rocket_width, top_margin + 2.25*rocket_height );
+    map.canvas.fillStyle = "black";
+    map.canvas.fillText((base_time-moving_time_step_small-moving_time_step_length+delta).toFixed(2),     left_margin+rocket_width+contracted_width, top_margin + 2.25*rocket_height );
+
+    map.canvas.fillText((base_time-time_step_small).toFixed(2),                  left_margin, top_margin + 2.75*rocket_height );
+    map.canvas.fillStyle = "green";
+    map.canvas.fillText((base_time-time_step_small).toFixed(2),                  left_margin+rocket_width, top_margin + 2.75*rocket_height );
+
+    map.canvas.fillText((base_time-moving_time_step_small+delta).toFixed(2),     left_margin+rocket_width, top_margin + 5.25*rocket_height );
+    map.canvas.fillStyle = "black";    
+    map.canvas.fillText((base_time-moving_time_step_small).toFixed(2),           left_margin+rocket_width-contracted_width, top_margin + 5.25*rocket_height );
+
+    map.canvas.fillText((base_time).toFixed(2),                                  left_margin+rocket_width, top_margin + 5.75*rocket_height );
+    map.canvas.fillStyle = "blue"
+    map.canvas.fillText((base_time).toFixed(2),                                  left_margin, top_margin + 5.75*rocket_height );
+
+    map.canvas.fillText((base_time).toFixed(2),                                  left_margin, top_margin + 8.25*rocket_height );
+    map.canvas.fillStyle = "black";
+    map.canvas.fillText((base_time+delta).toFixed(2),                            left_margin+contracted_width, top_margin + 8.25*rocket_height );
+
+    map.canvas.fillText((base_time+time_step_length).toFixed(2),                 left_margin+rocket_width, top_margin + 8.75*rocket_height );
+    map.canvas.fillStyle = "magenta";
+    map.canvas.fillText((base_time+time_step_length).toFixed(2),                 left_margin, top_margin + 8.75*rocket_height );
+
+    map.canvas.fillText((base_time+moving_time_step_length+delta).toFixed(2),    left_margin, top_margin + 11.25*rocket_height );
+    map.canvas.fillStyle = "black";
+    map.canvas.fillText((base_time+moving_time_step_length).toFixed(2),          left_margin-contracted_width, top_margin + 11.25*rocket_height );
+
+    // O's Frame
+
+    left_margin = 4*rocket_width;
+
+    for( var i=0;i<4;i++ ) {
+      map.canvas.drawImage( rocket_left_image, left_margin, top_margin + (i*3+1)*rocket_height, rocket_width, rocket_height );
+    }
+
+    map.canvas.drawImage( rocket_image, left_margin-contracted_width, top_margin, contracted_width, rocket_height );
+    map.canvas.drawImage( rocket_image, left_margin, top_margin + 3*rocket_height, contracted_width, rocket_height );
+    map.canvas.drawImage( rocket_image, left_margin+rocket_width - contracted_width, top_margin + 6*rocket_height, contracted_width, rocket_height );
+    map.canvas.drawImage( rocket_image, left_margin+rocket_width, top_margin + 9*rocket_height, contracted_width, rocket_height );
+
+    var delta = calc_delta(gamma, params.velocity, contracted_length);
+
+    var base_time = 0;
+
+    var time_step_length = calc_time_step( contracted_length, params.velocity );
+    var moving_time_step_length = calc_time_step_moving( time_step_length, gamma );
+
+    var time_step_small = calc_time_step( params.length - contracted_length, params.velocity );
+    var moving_time_step_small = calc_time_step_moving( time_step_small, gamma );
+
+    map.canvas.setLineDash([5,5]);
+
+    map.canvas.beginPath();
+
+    map.canvas.moveTo(left_margin-contracted_width, top_margin - 0.125*rocket_height);
+    map.canvas.lineTo(left_margin-contracted_width, top_margin +  0.5*rocket_height);
+
+    map.canvas.moveTo(left_margin+rocket_width, top_margin +  1.5*rocket_height);
+    map.canvas.lineTo(left_margin+rocket_width, top_margin + 2.0*rocket_height);
+
+
+    map.canvas.moveTo(left_margin+contracted_width, top_margin + 2.875*rocket_height);
+    map.canvas.lineTo(left_margin+contracted_width, top_margin +  3.5*rocket_height);
+
+    map.canvas.moveTo(left_margin+rocket_width, top_margin +  4.5*rocket_height);
+    map.canvas.lineTo(left_margin+rocket_width, top_margin + 5.0*rocket_height);
+
+
+    map.canvas.moveTo(left_margin+rocket_width-contracted_width, top_margin + 5.875*rocket_height);
+    map.canvas.lineTo(left_margin+rocket_width-contracted_width, top_margin +  6.5*rocket_height);
+
+    map.canvas.moveTo(left_margin, top_margin +  7.5*rocket_height);
+    map.canvas.lineTo(left_margin, top_margin + 8.0*rocket_height);
+
+
+    map.canvas.moveTo(left_margin+rocket_width+contracted_width, top_margin + 8.875*rocket_height);
+    map.canvas.lineTo(left_margin+rocket_width+contracted_width, top_margin +  9.5*rocket_height);
+
+    map.canvas.moveTo(left_margin, top_margin + 10.5*rocket_height);
+    map.canvas.lineTo(left_margin, top_margin + 11.0*rocket_height);
+
+    map.canvas.stroke();
+
+    map.canvas.textAlign = "center";
+
+    map.canvas.strokeStyle = "red";
+    map.canvas.beginPath();
+    map.canvas.moveTo(left_margin, top_margin - 0.125*rocket_height);
+    map.canvas.lineTo(left_margin, top_margin + 2.0*rocket_height);
+    map.canvas.stroke();
+
+    map.canvas.strokeStyle = "blue";
+    map.canvas.beginPath();
+    map.canvas.moveTo(left_margin, top_margin + 2.875*rocket_height);
+    map.canvas.lineTo(left_margin, top_margin + 5.0*rocket_height);
+    map.canvas.stroke();
+
+    map.canvas.strokeStyle = "green";
+    map.canvas.beginPath();
+    map.canvas.moveTo(left_margin+rocket_width, top_margin + 5.875*rocket_height);
+    map.canvas.lineTo(left_margin+rocket_width, top_margin + 8.0*rocket_height);
+    map.canvas.stroke();
+
+    map.canvas.strokeStyle = "magenta";
+    map.canvas.beginPath();
+    map.canvas.moveTo(left_margin+rocket_width, top_margin + 8.875*rocket_height);
+    map.canvas.lineTo(left_margin+rocket_width, top_margin + 11.0*rocket_height);
+    map.canvas.stroke();
+
+    map.canvas.strokeStyle = "black";
+
+
+    map.canvas.fillText((base_time-moving_time_step_length).toFixed(2), left_margin-contracted_width, top_margin - 0.25*rocket_height );
+    map.canvas.fillStyle = "red";
+    map.canvas.fillText((base_time-moving_time_step_length-delta).toFixed(2), left_margin, top_margin - 0.25*rocket_height );
+
+    map.canvas.fillText((base_time-time_step_length).toFixed(2),           left_margin, top_margin + 2.25*rocket_height );    
+    map.canvas.fillStyle = "black";
+    map.canvas.fillText((base_time-time_step_length).toFixed(2),     left_margin+rocket_width, top_margin + 2.25*rocket_height );
+
+    map.canvas.fillText((base_time-delta).toFixed(2),                  left_margin+contracted_width, top_margin + 2.75*rocket_height );
+    map.canvas.fillStyle = "blue";
+    map.canvas.fillText((base_time).toFixed(2),                  left_margin, top_margin + 2.75*rocket_height );
+
+    map.canvas.fillText((base_time).toFixed(2),           left_margin, top_margin + 5.25*rocket_height );
+    map.canvas.fillStyle = "black";
+    map.canvas.fillText((base_time).toFixed(2),     left_margin+rocket_width, top_margin + 5.25*rocket_height );
+
+
+    map.canvas.fillText((base_time+moving_time_step_small).toFixed(2),                            left_margin+rocket_width-contracted_width, top_margin + 5.75*rocket_height );
+    map.canvas.fillStyle = "green";
+    map.canvas.fillText((base_time+moving_time_step_small-delta).toFixed(2),                                  left_margin+rocket_width, top_margin + 5.75*rocket_height );
+
+    map.canvas.fillText((base_time+time_step_small).toFixed(2),                                  left_margin+rocket_width, top_margin + 8.25*rocket_height );
+    map.canvas.fillStyle = "black";
+    map.canvas.fillText((base_time+time_step_small).toFixed(2),                                  left_margin, top_margin + 8.25*rocket_height );
+
+
+    map.canvas.fillText((base_time+moving_time_step_small+moving_time_step_length-delta).toFixed(2),                 left_margin+rocket_width+contracted_width, top_margin + 8.75*rocket_height );
+    map.canvas.fillStyle = "magenta";
+    map.canvas.fillText((base_time+moving_time_step_small+moving_time_step_length).toFixed(2),                 left_margin+rocket_width, top_margin + 8.75*rocket_height );
+
+    map.canvas.fillText((base_time+time_step_small+time_step_length).toFixed(2),    left_margin+rocket_width, top_margin + 11.25*rocket_height );
+    map.canvas.fillStyle = "black";
+    map.canvas.fillText((base_time+time_step_small+time_step_length).toFixed(2),          left_margin, top_margin + 11.25*rocket_height );
+
+    map.canvas.beginPath();
+    map.canvas.moveTo(rocket_width*3, top_margin-50);
+    map.canvas.lineTo(rocket_width*3, top_margin-50+rocket_height*13);
+    map.canvas.stroke();
+
+    map.canvas.font = "30px Arial";
+    map.canvas.fillText("O' Frame", rocket_width*1.5, top_margin-50);
+    map.canvas.fillText("O Frame", rocket_width*4.5, top_margin-50);
+  }
+}
+
+</script>
