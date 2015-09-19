@@ -3,6 +3,12 @@
 <style>
 
 /* CSS goes here. */
+
+@font-face {
+    font-family: digitalFont;
+    src: url(digital-7.ttf);
+}
+
 body { margin: 0; }
 
 html, body, div, span, h1, h2, h3, h4, h5, h6, p, a, svg, canvas {
@@ -12,6 +18,27 @@ html, body, div, span, h1, h2, h3, h4, h5, h6, p, a, svg, canvas {
     font: 1em mplus-2p-light-sub,Helvetica,arial,freesans,clean,sans-serif;
     -webkit-font-smoothing: subpixel-antialiased; /* safari disables subpixel antialiasing for some reason */
 }
+
+#separator
+{
+  height: 25px;
+}
+
+#display
+{
+  color:black;
+}
+
+#heading
+{
+  width: 1200px;
+  text-align: center;
+  color: black;
+  font-family: digitalFont;
+  font-size: 400%;
+}
+
+#gui { top: 100px; left: 2px }
 
 svg {
     overflow: hidden;  /* Do not let IE draw outside the bounds of the svg element. */
@@ -32,10 +59,21 @@ body {
 
 <body>
 
+    <div id="heading">
+      Space War
+    </div>
     <div id="display">
+      This first demo enables us to experiment with different values for the length and velocity of the rockets.
+      We show events from both the frame of rocket O' and rocket O in the respective panels. We highlight four specific
+      events corresponding to the rocket tips and tails lining up with each other. 
       <div id="display_canvas">
         <canvas id="map_canvas" class="fill-screen"></canvas>
       </div>
+      <div id="separator"></div>
+      This second demo shows only events from the frmae of rocket O'. Again we can set the velocity and length of the rockets,
+      but here we can also set the time in rocket O''s frame. This lets us experiment with different time values in a more 
+      interactive fashion. We highlight in orange the location of the event where rocket O will fire it's projectile for
+      reference.
       <div id="display_canvas_2">
         <canvas id="map_canvas_2" class="fill-screen"></canvas>
       </div>
@@ -51,7 +89,7 @@ body {
 
 var map = {};
 map.width = 1400;
-map.height = 750;
+map.height = 675;
 
 d3.selectAll(".fill-screen").attr("width", map.width).attr("height", map.height);
 
@@ -124,7 +162,6 @@ function onload()
 
   var params_2 = {
     o_time       : 0,
-    o_prime_time : 0,
     length   : 6.0 * Math.sqrt(3),
     velocity : Math.sqrt(3)/2.0,
     "reset params" : function() {}
@@ -137,7 +174,6 @@ function onload()
   var length_2_controller = gui_2.add(params_2, 'length', 0.1, 100).listen();
   var velocity_2_controller = gui_2.add(params_2, 'velocity', 0.001, 1.0).listen();
   var o_controller = gui_2.add( params_2, "o_time", -75, 25 ).step(1).listen();
-  var o_prime_controller = gui_2.add( params_2, "o_prime_time", -75, 25 ).step(1).listen();
   var reset_2_controller = gui_2.add(params_2,'reset params');
 
   update();
@@ -150,7 +186,6 @@ function onload()
   length_2_controller.onChange( update_2 );
   velocity_2_controller.onChange( update_2 );
   o_controller.onChange( update_2 );
-  o_prime_controller.onChange( update_2 );
   reset_2_controller.onChange( reset_2 );
 
   function reset(value)
@@ -175,7 +210,7 @@ function onload()
   function update_2(value) {
 
     var top_margin = 100;
-    var left_margin = 200;
+    var left_margin = 500;
     var rocket_width = 200;
     var rocket_height = 50;
 
@@ -193,6 +228,9 @@ function onload()
 
     var o_prime_time = calc_time_step_moving( params_2.o_time, gamma );
     var rocket_offset = -params_2.o_time * params_2.velocity * 3.0 / (10.0 * params_2.length);
+
+    var d_fire = params_2.length * ((1.0/gamma) + gamma*params_2.velocity*params_2.velocity);
+    var d_fire_width = rocket_width * d_fire / params_2.length 
 
     var e = [false, false, false, false];
 
@@ -244,6 +282,18 @@ function onload()
     map.canvas_2.fillStyle = "black";
 
     map.canvas_2.setLineDash([5,5]);
+
+    map.canvas_2.strokeStyle = "orange";
+    map.canvas_2.beginPath();
+    map.canvas_2.moveTo( left_margin + d_fire_width, top_margin - 0.125*rocket_height );
+    map.canvas_2.lineTo( left_margin + d_fire_width, top_margin + 2.000*rocket_height );
+    map.canvas_2.stroke();
+    map.canvas_2.strokeStyle = "black";
+
+    map.canvas_2.fillStyle = "orange";
+    map.canvas_2.fillText( (-delta*gamma).toFixed(2), left_margin + d_fire_width, top_margin - 0.25*rocket_height );
+    map.canvas_2.fillText( "0.00", left_margin + d_fire_width, top_margin + 2.25*rocket_height );
+    map.canvas_2.fillStyle = "black";
 
     if( e[0] ) {
       map.canvas_2.strokeStyle = "red";
@@ -311,10 +361,13 @@ function onload()
       map.canvas_2.moveTo( left_margin+rocket_offset*rocket_width+contracted_width, top_margin + 1.5*rocket_height );
       map.canvas_2.lineTo( left_margin+rocket_offset*rocket_width+contracted_width, top_margin + 2.0*rocket_height );
       map.canvas_2.stroke();
-
     }
 
+    map.canvas_2.font = "30px Arial";
+    map.canvas_2.fillText("O' Frame", left_margin+rocket_width*0.5, top_margin-50 );
+
   }
+
 
   function update(value) {
 
